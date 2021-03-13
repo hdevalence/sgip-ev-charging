@@ -12,6 +12,7 @@ pub struct Config {
     pub charging: Charging,
     pub tesla_credentials: TeslaCredentials,
     pub sgip_credentials: SgipCredentials,
+    pub simulator: Simulator,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -34,8 +35,8 @@ pub struct SgipCredentials {
     pub sgip_password: String,
 }
 
-#[derive(Clone, Debug)]
-pub struct Vehicle {
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Simulator {
     pub capacity: f64,
     pub charge_rate: f64,
 }
@@ -46,6 +47,7 @@ impl Validate for Config {
             charging: self.charging.validate()?,
             tesla_credentials: self.tesla_credentials.validate()?,
             sgip_credentials: self.sgip_credentials.validate()?,
+            simulator: self.simulator.validate()?,
         })
     }
 }
@@ -80,8 +82,8 @@ impl Validate for Charging {
         {
             if prev_end >= next_start {
                 return Err(anyhow!(
-                    "charging times must be nonoverlapping and sorted, but prev_end {} >= next_start {}", 
-                    prev_end, 
+                    "charging times must be nonoverlapping and sorted, but prev_end {} >= next_start {}",
+                    prev_end,
                     next_start,
                 ));
             }
@@ -94,7 +96,9 @@ impl Validate for Charging {
 impl Validate for TeslaCredentials {
     fn validate(self) -> Result<Self, Error> {
         if self == Self::default() {
-            return Err(anyhow!("tesla credentials must be changed from default values"));
+            return Err(anyhow!(
+                "tesla credentials must be changed from default values"
+            ));
         }
         Ok(self)
     }
@@ -103,13 +107,21 @@ impl Validate for TeslaCredentials {
 impl Validate for SgipCredentials {
     fn validate(self) -> Result<Self, Error> {
         if self == Self::default() {
-            return Err(anyhow!("sgip credentials must be changed from default values"));
+            return Err(anyhow!(
+                "sgip credentials must be changed from default values"
+            ));
         }
         Ok(self)
     }
 }
 
-impl Default for Vehicle {
+impl Validate for Simulator {
+    fn validate(self) -> Result<Self, Error> {
+        Ok(self)
+    }
+}
+
+impl Default for Simulator {
     fn default() -> Self {
         Self {
             capacity: 75.,

@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use chrono_tz::US::Pacific;
 use hdrhistogram::Histogram;
 use sgip_signal::Forecast;
