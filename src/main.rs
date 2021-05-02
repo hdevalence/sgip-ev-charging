@@ -36,6 +36,9 @@ enum Command {
     },
     /// Merge the outputs of simulator runs into a single CSV.
     MergeCsv {
+        /// Only emit state of charge data
+        #[structopt(short, long)]
+        soc_only: bool,
         /// Output path for default config file
         #[structopt(short, long, parse(from_os_str))]
         output: PathBuf,
@@ -74,8 +77,12 @@ async fn main() {
 
             simulator(config, backtest_days, prefix).await.unwrap();
         }
-        Command::MergeCsv { output, inputs } => {
-            merge_csv(output, inputs).unwrap();
+        Command::MergeCsv {
+            output,
+            inputs,
+            soc_only,
+        } => {
+            merge_csv(output, inputs, soc_only).unwrap();
         }
     }
 }
@@ -109,7 +116,7 @@ async fn simulator(config: Config, backtest_days: usize, prefix: String) -> Resu
     Ok(())
 }
 
-fn merge_csv(output: PathBuf, inputs: Vec<PathBuf>) -> Result<(), Error> {
+fn merge_csv(output: PathBuf, inputs: Vec<PathBuf>, soc_only: bool) -> Result<(), Error> {
     let mut writer = csv::Writer::from_path(&output)?;
 
     let mut readers = inputs
@@ -137,7 +144,11 @@ fn merge_csv(output: PathBuf, inputs: Vec<PathBuf>) -> Result<(), Error> {
                 merged.push(time.to_string());
             }
 
-            merged.extend(record.iter().skip(2).map(String::from));
+            if soc_only {
+                merged.extend(record.iter().skip(2).take(1).map(String::from));
+            } else {
+                merged.extend(record.iter().skip(2).map(String::from));
+            }
         }
         writer.write_record(merged)?;
     }

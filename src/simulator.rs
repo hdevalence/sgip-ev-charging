@@ -84,7 +84,7 @@ impl Simulator {
         while now <= end {
             now = now + step;
             if !can_charge(now) {
-                tracing::info!(now = ?now.with_timezone(&Pacific).time(), "charging unavailable, waiting");
+                tracing::debug!(now = ?now.with_timezone(&Pacific).time(), "charging unavailable, waiting");
                 continue;
             }
 
