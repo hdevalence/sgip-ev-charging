@@ -12,15 +12,18 @@ pub struct Config {
     pub charging: Charging,
     pub tesla_credentials: TeslaCredentials,
     pub sgip_credentials: SgipCredentials,
-    pub simulator: Simulator,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Charging {
-    pub allowed_times: Vec<(NaiveTime, NaiveTime)>,
-    pub target_charge: f64,
-    pub target_time: NaiveTime,
     pub region: GridRegion,
+    pub allowed_times: Vec<(NaiveTime, NaiveTime)>,
+    pub charge_rate_kw: f64,
+    pub capacity_kwh: f64,
+    pub base_charge: f64,
+    pub base_charge_by: NaiveTime,
+    pub max_charge: f64,
+    pub flex_charge_hours: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
@@ -47,17 +50,29 @@ impl Validate for Config {
             charging: self.charging.validate()?,
             tesla_credentials: self.tesla_credentials.validate()?,
             sgip_credentials: self.sgip_credentials.validate()?,
-            simulator: self.simulator.validate()?,
         })
     }
 }
 
 impl Validate for Charging {
     fn validate(self) -> Result<Self, Error> {
-        if !(0.0..1.0).contains(&self.target_charge) {
+        if !(0.0..1.0).contains(&self.base_charge) {
             return Err(anyhow!(
                 "target_charge {} must be in range [0.0, 1.0)",
-                self.target_charge
+                self.base_charge
+            ));
+        }
+        if !(0.0..1.0).contains(&self.max_charge) {
+            return Err(anyhow!(
+                "max_charge {} must be in range [0.0, 1.0)",
+                self.base_charge
+            ));
+        }
+        if !(0..(7 * 24)).contains(&self.flex_charge_hours) {
+            return Err(anyhow!(
+                "flex_hours {} must be in range [0, {})",
+                self.base_charge,
+                7 * 24,
             ));
         }
 
@@ -115,31 +130,20 @@ impl Validate for SgipCredentials {
     }
 }
 
-impl Validate for Simulator {
-    fn validate(self) -> Result<Self, Error> {
-        Ok(self)
-    }
-}
-
-impl Default for Simulator {
-    fn default() -> Self {
-        Self {
-            capacity: 75.,
-            charge_rate: 8.,
-        }
-    }
-}
-
 impl Default for Charging {
     fn default() -> Charging {
         Charging {
+            region: GridRegion::CAISO_PGE,
             allowed_times: vec![(
                 NaiveTime::from_hms(00, 00, 00),
                 NaiveTime::from_hms(15, 00, 00),
             )],
-            target_charge: 0.85,
-            target_time: NaiveTime::from_hms(14, 50, 00),
-            region: GridRegion::CAISO_PGE,
+            max_charge: 0.85,
+            base_charge: 0.33,
+            base_charge_by: NaiveTime::from_hms(8, 00, 00),
+            capacity_kwh: 75.,
+            charge_rate_kw: 8.,
+            flex_charge_hours: 72,
         }
     }
 }

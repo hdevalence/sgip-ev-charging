@@ -98,7 +98,7 @@ async fn simulator(config: Config, backtest_days: usize, prefix: String) -> Resu
         tracing::info!(?start_day, "Starting simulation run");
 
         // Start a bit after the target time, to model a full day cycle.
-        let start_time = config.charging.target_time + Duration::minutes(15);
+        let start_time = config.charging.base_charge_by + Duration::minutes(15);
         let start = start_day.and_time(start_time).unwrap().with_timezone(&Utc);
         let mut sim = Simulator::new(config.clone(), start);
 
