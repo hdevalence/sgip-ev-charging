@@ -144,7 +144,7 @@ fn merge_csv(output: PathBuf, inputs: Vec<PathBuf>, soc_only: bool) -> Result<()
             }
 
             if soc_only {
-                merged.extend(record.iter().skip(2).take(1).map(String::from));
+                merged.extend(record.iter().skip(2).take(4).map(String::from));
             } else {
                 merged.extend(record.iter().skip(2).map(String::from));
             }

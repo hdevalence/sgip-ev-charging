@@ -2,7 +2,6 @@ use std::ops::Range;
 
 use chrono::{Date, DateTime, Duration, TimeZone, Utc};
 use chrono_tz::US::Pacific;
-use tracing::instrument;
 
 use super::config;
 

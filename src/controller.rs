@@ -1,26 +1,12 @@
 use chrono::{DateTime, Duration, Utc};
 use chrono_tz::US::Pacific;
 use sgip_signal::{Forecast, Moer};
-use tracing::instrument;
 
 use super::config;
 use crate::{DurationExt, ForecastExt, History};
 
-#[derive(Clone, Debug)]
-pub struct ChargeController {
-    config: config::Charging,
-    start: DateTime<Utc>,
-}
-
-impl ChargeController {
-    pub fn new(config: config::Charging, start: DateTime<Utc>) -> Self {
-        Self { config, start }
-    }
-
-    /// Should be called every 5 minutes.  Returns whether to charge, and the
-    /// emissions limit used to make that decision.
-    ///
-    /// Note: the `current` MOER must be included in `history`.
+impl config::Charging {
+    /// Returns whether to charge, and the emissions limit used to make that decision.
     pub fn can_charge(
         &self,
         now: DateTime<Utc>,
@@ -29,57 +15,51 @@ impl ChargeController {
         current: &Moer,
         forecast: &Forecast,
     ) -> (bool, u64) {
-        let end = self.start + Duration::hours(self.config.flex_charge_hours);
+        let end = now + Duration::hours(self.flex_charge_hours);
         // Don't charge outside of allowed times.
-        if !self
-            .config
-            .allowed_times_during(self.start..end)
-            .any(|range| range.contains(&now))
-        {
+        if !self.allowed_at(now) {
             return (false, 0);
         }
 
         // Don't charge if the state of charge is bigger than the maximum.
-        if soc >= self.config.max_charge {
+        if soc >= self.max_charge {
             return (false, 0);
         }
 
         let local_time = now.with_timezone(&Pacific).time();
         // Determine whether our goal is base charging or flex charging.
-        let below_base_charge = soc <= self.config.base_charge;
-        let before_base_charge_by = local_time < self.config.base_charge_by;
+        let below_base_charge = soc <= self.base_charge;
+        let before_base_charge_by = local_time < self.base_charge_by;
 
         let (target_time, target_charge) = if below_base_charge && before_base_charge_by {
             (
                 now.with_timezone(&Pacific)
                     .date()
-                    .and_time(self.config.base_charge_by)
+                    .and_time(self.base_charge_by)
                     .unwrap()
                     .with_timezone(&Utc),
-                self.config.base_charge,
+                self.base_charge,
             )
         } else {
-            (end, self.config.max_charge)
+            (end, self.max_charge)
         };
 
         let available_charging_hours: f64 = self
-            .config
             .allowed_times_during(now..target_time)
             .map(|range| (range.end - range.start).num_hours_f64())
             .sum();
 
-        let charge_kwh = (target_charge - soc) * self.config.capacity_kwh;
-        let charge_hours = charge_kwh / self.config.charge_rate_kw;
+        let charge_kwh = (target_charge - soc) * self.capacity_kwh;
+        let charge_hours = charge_kwh / self.charge_rate_kw;
         let charging_time_proportion = charge_hours / available_charging_hours;
 
         // The SGIP forecasts often get the curve right but offset up or down,
         // which biases the forecast emissions data, so combine the forecast
         // data with actual emissions over a longer time period.
         let lookback = self
-            .config
-            .allowed_times_during((now - Duration::hours(2 * self.config.flex_charge_hours))..now)
+            .allowed_times_during((now - Duration::hours(2 * self.flex_charge_hours))..now)
             .collect();
-        let lookahead = self.config.allowed_times_during(now..target_time).collect();
+        let lookahead = self.allowed_times_during(now..target_time).collect();
 
         let mut emissions = history.histogram_over(lookback);
         emissions += forecast.histogram_over(lookahead);

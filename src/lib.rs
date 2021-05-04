@@ -14,5 +14,4 @@ pub mod config;
 
 pub use config::{Config, Validate};
 pub use simulator::Simulator;
-pub use controller::ChargeController;
 pub use history::History;

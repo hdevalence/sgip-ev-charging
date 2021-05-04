@@ -5,8 +5,7 @@ use serde::Serialize;
 use sgip_signal::{Forecast, GridRegion, SgipSignal};
 use std::{collections::BTreeMap, fmt, ops::Range};
 
-use crate::Config;
-use crate::{ChargeController, History};
+use crate::{Config, History};
 
 #[derive(Serialize, Clone, Debug)]
 pub struct Record {
@@ -28,10 +27,6 @@ pub struct Simulator {
     config: Config,
     start: DateTime<Utc>,
     records: Vec<Record>,
-    s10_controller: ChargeController,
-    s30_controller: ChargeController,
-    s50_controller: ChargeController,
-    s70_controller: ChargeController,
 }
 struct F(pub f64, pub usize);
 
@@ -43,7 +38,6 @@ impl std::fmt::Debug for F {
 
 impl Simulator {
     pub fn new(config: Config, start: DateTime<Utc>) -> Self {
-        let charging = config.charging.clone();
         Self {
             config,
             start,
@@ -60,10 +54,6 @@ impl Simulator {
                 s50_emissions_limit: 0,
                 s70_emissions_limit: 0,
             }],
-            s10_controller: ChargeController::new(charging.clone(), start),
-            s30_controller: ChargeController::new(charging.clone(), start),
-            s50_controller: ChargeController::new(charging.clone(), start),
-            s70_controller: ChargeController::new(charging.clone(), start),
         }
     }
 
@@ -78,7 +68,7 @@ impl Simulator {
         )
         .await?;
         let region = self.config.charging.region;
-        let end = self.start + Duration::hours(self.config.charging.flex_charge_hours);
+        let end = self.start + Duration::hours(2 * self.config.charging.flex_charge_hours);
 
         let forecasts = ForecastTable::crawl(&mut sgip, region, self.start..end).await?;
         let history = History::new(
@@ -103,19 +93,23 @@ impl Simulator {
             let mut s70_soc = self.records.last().unwrap().s70_soc;
 
             let (s10_charge_now, s10_emissions_limit) = self
-                .s10_controller
+                .config
+                .charging
                 .can_charge(now, s10_soc, &history, &moer, &forecast);
 
             let (s30_charge_now, s30_emissions_limit) = self
-                .s30_controller
+                .config
+                .charging
                 .can_charge(now, s30_soc, &history, &moer, &forecast);
 
             let (s50_charge_now, s50_emissions_limit) = self
-                .s50_controller
+                .config
+                .charging
                 .can_charge(now, s50_soc, &history, &moer, &forecast);
 
             let (s70_charge_now, s70_emissions_limit) = self
-                .s70_controller
+                .config
+                .charging
                 .can_charge(now, s70_soc, &history, &moer, &forecast);
 
             tracing::info!(
