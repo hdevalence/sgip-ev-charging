@@ -1,55 +1,42 @@
 use chrono::{DateTime, Duration, Utc};
 use chrono_tz::US::Pacific;
-use hdrhistogram::Histogram;
 use sgip_signal::{Forecast, Moer};
+use tracing::instrument;
 
 use super::config;
-use crate::{forecast_ext::ForecastExt, DurationExt};
+use crate::{DurationExt, ForecastExt, History};
 
 #[derive(Clone, Debug)]
 pub struct ChargeController {
     config: config::Charging,
     start: DateTime<Utc>,
-    actual_rates: Histogram<u64>,
 }
 
 impl ChargeController {
     pub fn new(config: config::Charging, start: DateTime<Utc>) -> Self {
-        Self {
-            config,
-            start,
-            actual_rates: Histogram::<u64>::new(3).unwrap(),
-        }
-    }
-
-    fn record_rate(&mut self, moer: &Moer) {
-        self.actual_rates
-            .record((moer.rate * 1000.) as u64)
-            .unwrap();
+        Self { config, start }
     }
 
     /// Should be called every 5 minutes.  Returns whether to charge, and the
     /// emissions limit used to make that decision.
+    ///
+    /// Note: the `current` MOER must be included in `history`.
     pub fn can_charge(
-        &mut self,
+        &self,
         now: DateTime<Utc>,
         soc: f64,
-        moer: &Moer,
+        history: &History,
+        current: &Moer,
         forecast: &Forecast,
     ) -> (bool, u64) {
-        let current_rate = (moer.rate * 1000.) as u64;
         let end = self.start + Duration::hours(self.config.flex_charge_hours);
-
-        // Don't charge outside of allowed times, and don't record emissions
-        // statistics outside of allowed times.
+        // Don't charge outside of allowed times.
         if !self
             .config
             .allowed_times_during(self.start..end)
             .any(|range| range.contains(&now))
         {
             return (false, 0);
-        } else {
-            self.record_rate(moer);
         }
 
         // Don't charge if the state of charge is bigger than the maximum.
@@ -58,49 +45,65 @@ impl ChargeController {
         }
 
         let local_time = now.with_timezone(&Pacific).time();
-        let local_date = now.with_timezone(&Pacific).date();
-
+        // Determine whether our goal is base charging or flex charging.
         let below_base_charge = soc <= self.config.base_charge;
         let before_base_charge_by = local_time < self.config.base_charge_by;
 
-        let emissions_limit = if below_base_charge && before_base_charge_by {
-            let target = local_date
-                .and_time(self.config.base_charge_by)
-                .unwrap()
-                .with_timezone(&Utc);
-
-            let available_charging_hours: f64 = self
-                .config
-                .allowed_times_during(now..target)
-                .map(|range| (range.end - range.start).num_hours_f64())
-                .sum();
-
-            let base_charge_kwh = self.config.base_charge * self.config.capacity_kwh;
-            let base_charge_hours = base_charge_kwh / self.config.charge_rate_kw;
-
-            let charge_time_proportion = base_charge_hours / available_charging_hours;
-
-            // Combine recorded and forecast data to create a histogram of
-            // emissions rates over the entire charging session.
-            let mut emissions =
-                forecast.histogram_over(self.config.allowed_times_during(now..target).collect());
-            emissions += &self.actual_rates;
-
-            // Since we recorded the current rate in the histogram at the
-            // beginning of the function, we know that the 100th-percentile
-            // value of the histogram is >= the current rate.  This means that
-            // if charge_time_proportion >= 1, we're sure to charge continuously
-            // until the base charge target is met.
-            emissions.value_at_quantile(charge_time_proportion)
+        let (target_time, target_charge) = if below_base_charge && before_base_charge_by {
+            (
+                now.with_timezone(&Pacific)
+                    .date()
+                    .and_time(self.config.base_charge_by)
+                    .unwrap()
+                    .with_timezone(&Utc),
+                self.config.base_charge,
+            )
         } else {
-            let target = self.start + Duration::hours(self.config.flex_charge_hours);
-
-            let mut emissions =
-                forecast.histogram_over(self.config.allowed_times_during(now..target).collect());
-            emissions += &self.actual_rates;
-
-            emissions.value_at_quantile(1.0 - soc * self.config.max_charge)
+            (end, self.config.max_charge)
         };
+
+        let available_charging_hours: f64 = self
+            .config
+            .allowed_times_during(now..target_time)
+            .map(|range| (range.end - range.start).num_hours_f64())
+            .sum();
+
+        let charge_kwh = (target_charge - soc) * self.config.capacity_kwh;
+        let charge_hours = charge_kwh / self.config.charge_rate_kw;
+        let charging_time_proportion = charge_hours / available_charging_hours;
+
+        // The SGIP forecasts often get the curve right but offset up or down,
+        // which biases the forecast emissions data, so combine the forecast
+        // data with actual emissions over a longer time period.
+        let lookback = self
+            .config
+            .allowed_times_during((now - Duration::hours(2 * self.config.flex_charge_hours))..now)
+            .collect();
+        let lookahead = self.config.allowed_times_during(now..target_time).collect();
+
+        let mut emissions = history.histogram_over(lookback);
+        emissions += forecast.histogram_over(lookahead);
+
+        // Ensure that the current emissions rate is included in the histogram,
+        // so that the 100th-percentile value of the histogram is >= the current
+        // rate.  This means that if charge_time_proportion >= 1, we're sure to
+        // charge continuously until the charge target is met.
+        let current_rate = (current.rate * 1000.) as u64;
+        emissions += current_rate;
+
+        let emissions_limit = emissions.value_at_quantile(charging_time_proportion);
+        tracing::debug!(
+            ?target_time,
+            ?soc,
+            ?target_charge,
+            ?charge_kwh,
+            ?charge_hours,
+            ?available_charging_hours,
+            ?charging_time_proportion,
+            ?emissions_limit,
+            ?current_rate,
+            can_charge = (current_rate <= emissions_limit),
+        );
 
         (current_rate <= emissions_limit, emissions_limit)
     }

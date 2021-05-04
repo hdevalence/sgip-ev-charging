@@ -1,7 +1,7 @@
 use std::{fs::File, io::prelude::*, path::PathBuf};
 
 use anyhow::Error;
-use chrono::{Duration, Utc};
+use chrono::{Duration, NaiveTime, Utc};
 use chrono_tz::US::Pacific;
 use structopt::StructOpt;
 
@@ -90,15 +90,14 @@ async fn main() {
 async fn simulator(config: Config, backtest_days: usize, prefix: String) -> Result<(), Error> {
     let config = config.validate().unwrap();
 
-    for days_ago in 0..std::cmp::min(backtest_days, 28) {
+    for days_ago in 0..std::cmp::min(backtest_days, 21) {
         // Start at least 2 days ago to ensure data is available
-        let start_day = (Utc::now() - Duration::days(2 + days_ago as i64))
+        let start_day = (Utc::now() - Duration::days(4 + days_ago as i64))
             .with_timezone(&Pacific)
             .date();
         tracing::info!(?start_day, "Starting simulation run");
 
-        // Start a bit after the target time, to model a full day cycle.
-        let start_time = config.charging.base_charge_by + Duration::minutes(15);
+        let start_time = NaiveTime::from_hms(0, 0, 0);
         let start = start_day.and_time(start_time).unwrap().with_timezone(&Utc);
         let mut sim = Simulator::new(config.clone(), start);
 

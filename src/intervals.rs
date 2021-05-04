@@ -1,7 +1,8 @@
 use std::ops::Range;
 
-use chrono::{Date, DateTime, TimeZone, Utc};
+use chrono::{Date, DateTime, Duration, TimeZone, Utc};
 use chrono_tz::US::Pacific;
+use tracing::instrument;
 
 use super::config;
 
@@ -29,12 +30,9 @@ struct DateIterator<Tz: TimeZone>(pub Date<Tz>);
 impl<Tz: TimeZone> Iterator for DateIterator<Tz> {
     type Item = Date<Tz>;
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(date) = self.0.succ_opt() {
-            self.0 = date.clone();
-            Some(date)
-        } else {
-            None
-        }
+        let date = self.0.clone();
+        self.0 = date.succ();
+        Some(date)
     }
 }
 
@@ -54,6 +52,13 @@ impl config::Charging {
         DateIterator(start_date)
             .flat_map(charging_times_for_day)
             .map_while(move |interval| interval.intersect(&range))
+    }
+
+    pub fn allowed_at(&self, time: DateTime<Utc>) -> bool {
+        self.allowed_times_during(time..(time + Duration::hours(1)))
+            .next()
+            .map(|range| range.contains(&time))
+            .unwrap_or(false)
     }
 }
 

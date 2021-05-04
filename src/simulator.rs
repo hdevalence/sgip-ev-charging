@@ -1,12 +1,12 @@
-use anyhow::{anyhow, Error};
+use anyhow::Error;
 use chrono::{DateTime, Duration, Utc};
 use chrono_tz::US::Pacific;
 use serde::Serialize;
-use sgip_signal::SgipSignal;
-use std::fmt;
+use sgip_signal::{Forecast, GridRegion, SgipSignal};
+use std::{collections::BTreeMap, fmt, ops::Range};
 
-use crate::ChargeController;
 use crate::Config;
+use crate::{ChargeController, History};
 
 #[derive(Serialize, Clone, Debug)]
 pub struct Record {
@@ -79,44 +79,22 @@ impl Simulator {
         .await?;
         let region = self.config.charging.region;
         let end = self.start + Duration::hours(self.config.charging.flex_charge_hours);
-        let charging_times = self
-            .config
-            .charging
-            .allowed_times_during(self.start..end)
-            .collect::<Vec<_>>();
 
-        let can_charge =
-            |time: DateTime<Utc>| charging_times.iter().any(|range| range.contains(&time));
+        let forecasts = ForecastTable::crawl(&mut sgip, region, self.start..end).await?;
+        let history = History::new(
+            region,
+            sgip.historic_moers(region, self.start, Some(end + Duration::hours(1)))
+                .await?,
+        );
 
         let step = Duration::minutes(5);
         let mut now = self.records.last().expect("records is nonempty").time;
         while now <= end {
             now = now + step;
-            if !can_charge(now) {
-                tracing::debug!(now = ?now.with_timezone(&Pacific).time(), "charging unavailable, waiting");
-                continue;
-            }
 
-            tracing::debug!(?now, "charging allowed, checking emissions");
+            let moer = history.at(now).unwrap();
+            let forecast = forecasts.at(now).unwrap();
 
-            let forecast = sgip
-                .historic_forecasts(region, now, now + step)
-                .await?
-                .get(0)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "failed to get historic forecast for {}, {}",
-                        now,
-                        now + step
-                    )
-                })?
-                .clone();
-            let moer = sgip
-                .historic_moers(region, now, Some(now + step))
-                .await?
-                .get(0)
-                .ok_or_else(|| anyhow!("failed to get historic moer for {}, {}", now, now + step))?
-                .clone();
             let emissions = (moer.rate * 1000.) as u64;
 
             let mut s10_soc = self.records.last().unwrap().s10_soc;
@@ -126,19 +104,19 @@ impl Simulator {
 
             let (s10_charge_now, s10_emissions_limit) = self
                 .s10_controller
-                .can_charge(now, s10_soc, &moer, &forecast);
+                .can_charge(now, s10_soc, &history, &moer, &forecast);
 
             let (s30_charge_now, s30_emissions_limit) = self
                 .s30_controller
-                .can_charge(now, s30_soc, &moer, &forecast);
+                .can_charge(now, s30_soc, &history, &moer, &forecast);
 
             let (s50_charge_now, s50_emissions_limit) = self
                 .s50_controller
-                .can_charge(now, s50_soc, &moer, &forecast);
+                .can_charge(now, s50_soc, &history, &moer, &forecast);
 
             let (s70_charge_now, s70_emissions_limit) = self
                 .s70_controller
-                .can_charge(now, s70_soc, &moer, &forecast);
+                .can_charge(now, s70_soc, &history, &moer, &forecast);
 
             tracing::info!(
                 now = ?now.with_timezone(&Pacific).time(),
@@ -178,13 +156,41 @@ impl Simulator {
                 s50_emissions_limit,
                 s70_emissions_limit,
             });
-
-            let max = self.config.charging.max_charge;
-            if s10_soc >= max && s30_soc >= max && s50_soc >= max && s70_soc >= max {
-                break;
-            }
         }
 
         Ok(())
+    }
+}
+
+struct ForecastTable {
+    data: BTreeMap<DateTime<Utc>, Forecast>,
+}
+
+impl ForecastTable {
+    pub fn at(&self, time: DateTime<Utc>) -> Option<&Forecast> {
+        self.data
+            .range(..=time)
+            .next_back()
+            .map(|(_, forecast)| forecast)
+    }
+
+    pub async fn crawl(
+        sgip: &mut SgipSignal,
+        region: GridRegion,
+        range: Range<DateTime<Utc>>,
+    ) -> Result<Self, Error> {
+        let mut data = BTreeMap::default();
+
+        let mut start = range.start;
+        let step = Duration::days(1);
+        while start < range.end {
+            let end = std::cmp::min(start + step, range.end);
+            for forecast in sgip.historic_forecasts(region, start, end).await? {
+                data.insert(forecast.generated_at, forecast);
+            }
+            start = start + step;
+        }
+
+        Ok(Self { data })
     }
 }
