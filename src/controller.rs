@@ -14,16 +14,16 @@ impl config::Charging {
         history: &History,
         current: &Moer,
         forecast: &Forecast,
-    ) -> (bool, u64) {
+    ) -> (bool, i64) {
         let end = now + Duration::hours(self.flex_charge_hours);
         // Don't charge outside of allowed times.
         if !self.allowed_at(now) {
-            return (false, 0);
+            return (false, -1);
         }
 
         // Don't charge if the state of charge is bigger than the maximum.
         if soc >= self.max_charge {
-            return (false, 0);
+            return (false, -1);
         }
 
         let local_time = now.with_timezone(&Pacific).time();
@@ -85,6 +85,6 @@ impl config::Charging {
             can_charge = (current_rate <= emissions_limit),
         );
 
-        (current_rate <= emissions_limit, emissions_limit)
+        (current_rate <= emissions_limit, emissions_limit as i64)
     }
 }

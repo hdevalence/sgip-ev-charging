@@ -16,10 +16,14 @@ pub struct Record {
     pub s50_soc: f64,
     pub s70_soc: f64,
     pub emissions: u64,
-    pub s10_emissions_limit: u64,
-    pub s30_emissions_limit: u64,
-    pub s50_emissions_limit: u64,
-    pub s70_emissions_limit: u64,
+    pub s10_emissions_limit: i64,
+    pub s30_emissions_limit: i64,
+    pub s50_emissions_limit: i64,
+    pub s70_emissions_limit: i64,
+    pub s10_emissions_used: u64,
+    pub s30_emissions_used: u64,
+    pub s50_emissions_used: u64,
+    pub s70_emissions_used: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -53,6 +57,10 @@ impl Simulator {
                 s30_emissions_limit: 0,
                 s50_emissions_limit: 0,
                 s70_emissions_limit: 0,
+                s10_emissions_used: 0,
+                s30_emissions_used: 0,
+                s50_emissions_used: 0,
+                s70_emissions_used: 0,
             }],
         }
     }
@@ -149,6 +157,10 @@ impl Simulator {
                 s30_emissions_limit,
                 s50_emissions_limit,
                 s70_emissions_limit,
+                s10_emissions_used: if s10_charge_now { emissions } else { 0 },
+                s30_emissions_used: if s30_charge_now { emissions } else { 0 },
+                s50_emissions_used: if s50_charge_now { emissions } else { 0 },
+                s70_emissions_used: if s70_charge_now { emissions } else { 0 },
             });
         }
 

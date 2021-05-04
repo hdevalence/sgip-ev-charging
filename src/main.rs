@@ -39,6 +39,9 @@ enum Command {
         /// Only emit state of charge data
         #[structopt(short, long)]
         soc_only: bool,
+        /// Only emit marginal emissions data
+        #[structopt(short, long)]
+        emissions_only: bool,
         /// Output path for default config file
         #[structopt(short, long, parse(from_os_str))]
         output: PathBuf,
@@ -81,8 +84,9 @@ async fn main() {
             output,
             inputs,
             soc_only,
+            emissions_only,
         } => {
-            merge_csv(output, inputs, soc_only).unwrap();
+            merge_csv(output, inputs, soc_only, emissions_only).unwrap();
         }
     }
 }
@@ -115,7 +119,12 @@ async fn simulator(config: Config, backtest_days: usize, prefix: String) -> Resu
     Ok(())
 }
 
-fn merge_csv(output: PathBuf, inputs: Vec<PathBuf>, soc_only: bool) -> Result<(), Error> {
+fn merge_csv(
+    output: PathBuf,
+    inputs: Vec<PathBuf>,
+    soc_only: bool,
+    emissions_only: bool,
+) -> Result<(), Error> {
     let mut writer = csv::Writer::from_path(&output)?;
 
     let mut readers = inputs
@@ -145,6 +154,8 @@ fn merge_csv(output: PathBuf, inputs: Vec<PathBuf>, soc_only: bool) -> Result<()
 
             if soc_only {
                 merged.extend(record.iter().skip(2).take(4).map(String::from));
+            } else if emissions_only {
+                merged.extend(record.iter().skip(6).take(1 + 4 + 4).map(String::from));
             } else {
                 merged.extend(record.iter().skip(2).map(String::from));
             }
