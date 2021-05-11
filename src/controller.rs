@@ -61,8 +61,7 @@ impl config::Charging {
             .collect();
         let lookahead = self.allowed_times_during(now..target_time).collect();
 
-        let mut emissions = history.histogram_over(lookback);
-        emissions += forecast.histogram_over(lookahead);
+        let mut emissions = history.histogram_over(lookback) + forecast.histogram_over(lookahead);
 
         // Ensure that the current emissions rate is included in the histogram,
         // so that the 100th-percentile value of the histogram is >= the current
