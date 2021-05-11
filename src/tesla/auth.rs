@@ -60,7 +60,7 @@ impl AccessToken {
         let session_id_cookie = rsp1
             .headers()
             .get("set-cookie")
-            .ok_or_else(|| anyhow!("missing cookie value"))?
+            .ok_or_else(|| anyhow!("missing cookie value in rsp {:?}", rsp1))?
             .to_owned();
         tracing::debug!(?session_id_cookie);
 
