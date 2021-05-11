@@ -201,7 +201,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_login() {
-        tracing_subscriber::fmt::init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let (user, pass) = env_creds();
 
@@ -212,7 +212,7 @@ mod tests {
 
     #[tokio::test]
     async fn tesla_scratch() {
-        tracing_subscriber::fmt::init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let (user, pass) = env_creds();
 
