@@ -6,6 +6,7 @@ mod forecast_ext;
 mod history;
 mod intervals;
 mod simulator;
+mod tesla;
 
 use chrono_ext::DurationExt;
 use forecast_ext::ForecastExt;
