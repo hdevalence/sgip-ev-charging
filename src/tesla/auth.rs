@@ -170,77 +170,22 @@ impl AccessToken {
 
         Ok(token)
     }
-}
 
-async fn scratch(token: &AccessToken) -> Result<(), Error> {
-    use reqwest::header;
-    let mut headers = header::HeaderMap::new();
-    let mut auth_value =
-        header::HeaderValue::from_str(&format!("Bearer {}", token.access_token)).unwrap();
-    auth_value.set_sensitive(true);
-    headers.insert(header::AUTHORIZATION, auth_value);
+    /// Build a [`reqwest::Client`] that supplies this token in request headers.
+    pub(crate) fn build_client(&self, user_agent: &str) -> reqwest::Client {
+        use reqwest::header;
+        let mut headers = header::HeaderMap::new();
+        let mut auth_value =
+            header::HeaderValue::from_str(&format!("Bearer {}", self.access_token)).unwrap();
+        auth_value.set_sensitive(true);
+        headers.insert(header::AUTHORIZATION, auth_value);
 
-    let client = reqwest::Client::builder()
-        .user_agent("sgip-ev-charging")
-        .default_headers(headers)
-        .build()?;
-
-    let base = "https://owner-api.teslamotors.com/";
-
-    let vehicles = client
-        .get(format!("{}/api/1/vehicles", base))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
-
-    tracing::info!(?vehicles);
-
-    let id = vehicles
-        .get("response")
-        .unwrap()
-        .get(0)
-        .unwrap()
-        .get("id")
-        .unwrap()
-        .as_i64()
-        .unwrap();
-
-    let charge = client
-        .get(format!(
-            "{}/api/1/vehicles/{}/data_request/charge_state",
-            base, id
-        ))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
-
-    tracing::info!(?charge);
-
-    let rsp1 = client
-        .post(format!(
-            "{}/api/1/vehicles/{}/command/charge_start",
-            base, id
-        ))
-        .send()
-        .await?
-        .text()
-        .await?;
-    tracing::info!(?rsp1);
-
-    let rsp2 = client
-        .post(format!(
-            "{}/api/1/vehicles/{}/command/charge_stop",
-            base, id
-        ))
-        .send()
-        .await?
-        .text()
-        .await?;
-    tracing::info!(?rsp2);
-
-    todo!()
+        reqwest::Client::builder()
+            .user_agent(user_agent)
+            .default_headers(headers)
+            .build()
+            .unwrap()
+    }
 }
 
 #[cfg(test)]
@@ -249,11 +194,9 @@ mod tests {
 
     fn env_creds() -> (String, String) {
         (
-        std::env::var("TESLA_TEST_USER")
-            .expect("TESLA_TEST_USER is unset, please register an account and set the environment variable"),
-        std::env::var("TESLA_TEST_PASS")
-            .expect("TESLA_TEST_PASS is unset, please register an account and set the environment variable"),
-    )
+            std::env::var("TESLA_TEST_USER").expect("TESLA_TEST_USER is unset"),
+            std::env::var("TESLA_TEST_PASS").expect("TESLA_TEST_PASS is unset"),
+        )
     }
 
     #[tokio::test]
@@ -262,10 +205,45 @@ mod tests {
 
         let (user, pass) = env_creds();
 
+        let _token = AccessToken::login(&user, &pass, "sgip-ev-charging-test")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn tesla_scratch() {
+        tracing_subscriber::fmt::init();
+
+        let (user, pass) = env_creds();
+
         let token = AccessToken::login(&user, &pass, "sgip-ev-charging-test")
             .await
             .unwrap();
 
-        scratch(&token).await.unwrap();
+        let client = token.build_client("sgip-ev-charging-test");
+
+        let base = "https://owner-api.teslamotors.com/";
+
+        let vehicles = token.vehicles("sgip-ev-charging-test").await.unwrap();
+
+        for v in &vehicles {
+            let data = v.data().await.unwrap();
+            tracing::info!(?v, ?data);
+        }
+
+        let v = vehicles[0].clone();
+        let id = v.id;
+
+        v.wake().await.unwrap();
+        let charge_state = v.charge_state().await.unwrap();
+        tracing::info!(?charge_state);
+        tracing::info!(rsp = ?v.charge_start().await);
+        tracing::info!(rsp = ?v.charge_start().await);
+        let charge_state = v.charge_state().await.unwrap();
+        tracing::info!(?charge_state);
+        tracing::info!(rsp = ?v.charge_stop().await);
+        tracing::info!(rsp = ?v.charge_stop().await);
+
+        todo!()
     }
 }
