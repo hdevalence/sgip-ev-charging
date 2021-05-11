@@ -53,6 +53,12 @@ impl config::Charging {
         let charge_hours = charge_kwh / self.charge_rate_kw;
         let charging_time_proportion = charge_hours / available_charging_hours;
 
+        metrics::gauge!("available_charging_hours", available_charging_hours);
+        metrics::gauge!("charge_kwh", charge_kwh);
+        metrics::gauge!("charge_hours", charge_hours);
+        metrics::gauge!("charging_time_proportion", charging_time_proportion);
+        metrics::gauge!("target_charge", target_charge);
+
         // The SGIP forecasts often get the curve right but offset up or down,
         // which biases the forecast emissions data, so combine the forecast
         // data with actual emissions over a longer time period.
@@ -83,6 +89,20 @@ impl config::Charging {
             ?current_rate,
             can_charge = (current_rate <= emissions_limit),
         );
+
+        let emissions_quantile = |q: f64| (emissions.value_at_quantile(q) as f64) / 1000.;
+        metrics::gauge!("emissions_min", emissions_quantile(0.00));
+        metrics::gauge!("emissions_q10", emissions_quantile(0.10));
+        metrics::gauge!("emissions_q25", emissions_quantile(0.25));
+        metrics::gauge!("emissions_q50", emissions_quantile(0.50));
+        metrics::gauge!("emissions_q75", emissions_quantile(0.75));
+        metrics::gauge!("emissions_q90", emissions_quantile(0.90));
+        metrics::gauge!("emissions_max", emissions_quantile(1.00));
+        metrics::gauge!(
+            "emissions_limit",
+            emissions_quantile(charging_time_proportion)
+        );
+        metrics::gauge!("emissions_current", current.rate);
 
         (current_rate <= emissions_limit, emissions_limit as i64)
     }

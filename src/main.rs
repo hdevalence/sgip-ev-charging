@@ -1,4 +1,4 @@
-use std::{fs::File, io::prelude::*, path::PathBuf};
+use std::{fs::File, io::prelude::*, net::SocketAddr, path::PathBuf};
 
 use anyhow::Error;
 use chrono::{Duration, NaiveTime, Utc};
@@ -21,6 +21,15 @@ enum Command {
         /// Output path for default config file
         #[structopt(short, long, parse(from_os_str))]
         output: PathBuf,
+    },
+    /// Run the charge controller using the provided config.
+    Start {
+        /// Config file path
+        #[structopt(short, long, parse(from_os_str))]
+        config: PathBuf,
+        /// Prometheus endpoint address
+        #[structopt(short, long)]
+        prometheus_endpoint: Option<SocketAddr>,
     },
     /// Simulate the charging algorithm over historical data over a number of backtest days.
     Simulator {
@@ -51,12 +60,28 @@ enum Command {
     },
 }
 
+fn load_config(config: PathBuf) -> Config {
+    let mut buf = String::new();
+    File::open(config)
+        .unwrap()
+        .read_to_string(&mut buf)
+        .unwrap();
+    toml::from_str(&buf).unwrap()
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
     let opt = Opt::from_args();
     match opt.cmd {
+        Command::Start {
+            config,
+            prometheus_endpoint,
+        } => {
+            let config = load_config(config);
+            start(config, prometheus_endpoint).await.unwrap();
+        }
         Command::GenerateConfig { output } => {
             let config_toml = toml::to_string_pretty(&Config::default()).unwrap();
             File::create(output)
@@ -69,15 +94,7 @@ async fn main() {
             backtest_days,
             prefix,
         } => {
-            let config: Config = {
-                let mut buf = String::new();
-                File::open(config)
-                    .unwrap()
-                    .read_to_string(&mut buf)
-                    .unwrap();
-                toml::from_str(&buf).unwrap()
-            };
-
+            let config = load_config(config);
             simulator(config, backtest_days, prefix).await.unwrap();
         }
         Command::MergeCsv {
@@ -88,6 +105,92 @@ async fn main() {
         } => {
             merge_csv(output, inputs, soc_only, emissions_only).unwrap();
         }
+    }
+}
+
+async fn start(config: Config, prometheus_endpoint: Option<SocketAddr>) -> Result<(), Error> {
+    if let Some(addr) = prometheus_endpoint {
+        metrics_exporter_prometheus::PrometheusBuilder::new()
+            .listen_address(addr)
+            .install()
+            .unwrap();
+    }
+
+    let Config {
+        charging,
+        sgip_credentials,
+        tesla_credentials,
+    } = config;
+
+    use sgip_ev_charging::{tesla, History};
+    use sgip_signal::SgipSignal;
+
+    tracing::info!("Logging in to SGIP API");
+    let mut sgip = SgipSignal::login(
+        &sgip_credentials.sgip_username,
+        &sgip_credentials.sgip_password,
+    )
+    .await?;
+
+    tracing::info!("Logging in to Tesla API");
+    let tesla_token = tesla::AccessToken::login(
+        &tesla_credentials.tesla_username,
+        &tesla_credentials.tesla_password,
+        "sgip-ev-charging",
+    )
+    .await?;
+
+    tracing::info!("Fetching vehicle info");
+    let vehicle = tesla_token.vehicles("sgip-ev-charging").await?.remove(0);
+
+    loop {
+        if charging.allowed_at(Utc::now()) {
+            // This can be slow, so start in now in another task
+            // and come back to it.
+            let vehicle2 = vehicle.clone();
+            let charge_state = tokio::spawn(async move {
+                tracing::info!("waking vehicle");
+                vehicle2.wake().await?;
+                vehicle2.charge_state().await
+            });
+
+            // TODO: don't download these every time
+            tracing::info!("Fetching SGIP data");
+            let forecast = sgip.forecast(charging.region).await?;
+            let history = History::new(
+                charging.region,
+                sgip.historic_moers(
+                    charging.region,
+                    Utc::now() - Duration::hours(2 * charging.flex_charge_hours),
+                    None,
+                )
+                .await?,
+            );
+            let current = sgip.moer(charging.region).await?;
+            tracing::info!(?current, "Got SGIP data");
+
+            // Ensure the car is online
+            let charge_state = charge_state.await??;
+            tracing::debug!(?charge_state);
+
+            let soc = charge_state.battery_level as f64 / 100.;
+            tracing::info!(?soc);
+
+            if charging
+                .can_charge(Utc::now(), soc, &history, &current, &forecast)
+                .0
+            {
+                let rsp = vehicle.charge_start().await;
+                tracing::info!(?rsp, "charge start");
+            } else {
+                let rsp = vehicle.charge_stop().await;
+                tracing::info!(?rsp, "charge stop");
+            }
+        } else {
+            tracing::info!("not allowed to charge, sleeping");
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(5 * 60)).await;
     }
 }
 
