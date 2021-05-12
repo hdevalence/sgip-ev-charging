@@ -53,6 +53,7 @@ impl config::Charging {
         let charge_hours = charge_kwh / self.charge_rate_kw;
         let charging_time_proportion = charge_hours / available_charging_hours;
 
+        metrics::gauge!("soc", soc);
         metrics::gauge!("available_charging_hours", available_charging_hours);
         metrics::gauge!("charge_kwh", charge_kwh);
         metrics::gauge!("charge_hours", charge_hours);
