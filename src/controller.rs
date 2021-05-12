@@ -103,7 +103,6 @@ impl config::Charging {
             "emissions_limit",
             emissions_quantile(charging_time_proportion)
         );
-        metrics::gauge!("emissions_current", current.rate);
 
         (current_rate <= emissions_limit, emissions_limit as i64)
     }

@@ -1,7 +1,7 @@
 use std::{fs::File, io::prelude::*, net::SocketAddr, path::PathBuf};
 
 use anyhow::Error;
-use chrono::{Duration, NaiveTime, Utc};
+use chrono::{Duration, NaiveTime, TimeZone, Utc};
 use chrono_tz::US::Pacific;
 use structopt::StructOpt;
 
@@ -143,7 +143,19 @@ async fn start(config: Config, prometheus_endpoint: Option<SocketAddr>) -> Resul
     tracing::info!("Fetching vehicle info");
     let vehicle = tesla_token.vehicles("sgip-ev-charging").await?.remove(0);
 
+    let next_window = || {
+        let now = Utc::now().timestamp();
+        // Next 5-minute interval.
+        let next = now + (300 - now.rem_euclid(300));
+        Utc.timestamp(next, 0)
+    };
+
     loop {
+        tracing::info!("fetching current MOER");
+        let current = sgip.moer(charging.region).await?;
+        tracing::info!(?current);
+        metrics::gauge!("emissions_current", current.rate);
+
         if charging.allowed_at(Utc::now()) {
             // This can be slow, so start in now in another task
             // and come back to it.
@@ -166,8 +178,6 @@ async fn start(config: Config, prometheus_endpoint: Option<SocketAddr>) -> Resul
                 )
                 .await?,
             );
-            let current = sgip.moer(charging.region).await?;
-            tracing::info!(?current, "Got SGIP data");
 
             // Ensure the car is online
             let charge_state = charge_state.await??;
@@ -190,7 +200,8 @@ async fn start(config: Config, prometheus_endpoint: Option<SocketAddr>) -> Resul
             tracing::info!("not allowed to charge, sleeping");
         }
 
-        tokio::time::sleep(std::time::Duration::from_secs(5 * 60)).await;
+        let next = next_window();
+        tokio::time::sleep((next - Utc::now()).to_std().unwrap()).await;
     }
 }
 
