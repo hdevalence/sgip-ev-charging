@@ -32,6 +32,7 @@ pub struct Vehicle {
     pub id: u64,
     pub vehicle_id: u64,
     // this client has the token preconfigured
+    // no handling of refreshes, so it will stop working after 45 days
     client: reqwest::Client,
 }
 
