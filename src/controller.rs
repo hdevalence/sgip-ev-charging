@@ -98,11 +98,6 @@ impl config::Charging {
         let available_charging_hours = goal.available_charging_hours(now);
         let required_charging_proportion = goal.required_charging_proportion(now, soc);
 
-        metrics::gauge!("soc", soc);
-        metrics::gauge!("available_charging_hours", available_charging_hours);
-        metrics::gauge!("required_charging_proportion", required_charging_proportion);
-        metrics::gauge!("target_charge", goal.charge);
-
         // The SGIP forecasts often get the curve right but offset up or down,
         // which biases the forecast emissions data, so combine the forecast
         // data with actual emissions over a longer time period.
@@ -121,16 +116,25 @@ impl config::Charging {
         emissions += current_rate;
 
         let emissions_limit = emissions.value_at_quantile(required_charging_proportion);
-        tracing::debug!(
-            ?goal.time,
-            ?goal.charge,
+        let can_charge = current_rate <= emissions_limit;
+
+        // Finally, do tracing and logging of the factors for the decision.
+
+        tracing::info!(
+            now = ?now.with_timezone(&Pacific),
+            goal.time = ?now.with_timezone(&Pacific),
             ?soc,
+            ?goal.charge,
             ?required_charging_proportion,
             ?emissions_limit,
             ?current_rate,
-            can_charge = (current_rate <= emissions_limit),
+            ?can_charge,
         );
 
+        metrics::gauge!("soc", soc);
+        metrics::gauge!("available_charging_hours", available_charging_hours);
+        metrics::gauge!("required_charging_proportion", required_charging_proportion);
+        metrics::gauge!("target_charge", goal.charge);
         let emissions_quantile = |q: f64| (emissions.value_at_quantile(q) as f64) / 1000.;
         metrics::gauge!("emissions_min", emissions_quantile(0.00));
         metrics::gauge!("emissions_q10", emissions_quantile(0.10));
@@ -144,6 +148,6 @@ impl config::Charging {
             emissions_quantile(required_charging_proportion)
         );
 
-        (current_rate <= emissions_limit, emissions_limit as i64)
+        (can_charge, emissions_limit as i64)
     }
 }
