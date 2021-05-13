@@ -151,11 +151,8 @@ async fn start(config: Config, prometheus_endpoint: Option<SocketAddr>) -> Resul
     };
 
     loop {
-        tracing::info!("fetching current MOER");
+        tracing::info!("Fetching current MOER");
         let current = sgip.moer(charging.region).await?;
-        tracing::info!(?current);
-        metrics::gauge!("emissions_current", current.rate);
-
         if charging.allowed_at(Utc::now()) {
             // This can be slow, so start in now in another task
             // and come back to it.
@@ -197,7 +194,9 @@ async fn start(config: Config, prometheus_endpoint: Option<SocketAddr>) -> Resul
                 tracing::info!(?rsp, "charge stop");
             }
         } else {
-            tracing::info!("not allowed to charge, sleeping");
+            // Log the current MOER anyways, for metrics dashboards.
+            metrics::gauge!("emissions_current", current.rate);
+            tracing::info!("Not allowed to charge, sleeping");
         }
 
         let next = next_window();
