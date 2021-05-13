@@ -21,7 +21,7 @@ pub struct ChargeState {
     pub charge_rate: f32,
     pub charge_to_max_range: bool,
     pub charger_actual_current: u32,
-    pub charger_phases: u32,
+    pub charger_phases: Option<u32>,
     pub charger_pilot_current: u32,
     pub charger_power: u32,
     pub charger_voltage: u32,
