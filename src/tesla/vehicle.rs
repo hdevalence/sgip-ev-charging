@@ -36,6 +36,7 @@ pub struct Vehicle {
 }
 
 impl AccessToken {
+    #[tracing::instrument(skip(self))]
     pub async fn vehicles(&self, user_agent: &str) -> Result<Vec<Vehicle>, Error> {
         let client = self.build_client(user_agent);
 
@@ -65,6 +66,7 @@ impl AccessToken {
 
 impl Vehicle {
     /// Wake the vehicle from sleep, returning only when the vehicle reports that it is online.
+    #[tracing::instrument(skip(self))]
     pub async fn wake(&self) -> Result<(), Error> {
         #[derive(Deserialize)]
         struct Response {
@@ -102,6 +104,7 @@ impl Vehicle {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn data(&self) -> Result<VehicleData, Error> {
         #[derive(Deserialize)]
         struct Response {
@@ -118,6 +121,7 @@ impl Vehicle {
             .response)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn charge_state(&self) -> Result<ChargeState, Error> {
         #[derive(Deserialize)]
         struct Response {
@@ -137,6 +141,7 @@ impl Vehicle {
             .response)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn charge_start(&self) -> Result<(), Error> {
         #[derive(Deserialize)]
         struct Response {
@@ -167,6 +172,7 @@ impl Vehicle {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn charge_stop(&self) -> Result<(), Error> {
         #[derive(Deserialize)]
         struct Response {

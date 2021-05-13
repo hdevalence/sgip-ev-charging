@@ -20,6 +20,7 @@ pub struct AccessToken {
 }
 
 impl AccessToken {
+    #[tracing::instrument(skip(password))]
     pub async fn login(email: &str, password: &str, user_agent: &str) -> Result<Self, Error> {
         // “... if you want to make an API request to the Tesla servers, WHICH ARE IN HELL...”
 

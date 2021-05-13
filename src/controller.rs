@@ -37,6 +37,7 @@ impl<'c> Goal<'c> {
 
 impl config::Charging {
     /// Returns whether to charge, and the emissions limit used to make that decision.
+    #[tracing::instrument(skip(self,current,history,forecast))]
     pub fn can_charge(
         &self,
         now: DateTime<Utc>,
