@@ -20,10 +20,9 @@ pub struct Charging {
     pub allowed_times: Vec<(NaiveTime, NaiveTime)>,
     pub charge_rate_kw: f64,
     pub capacity_kwh: f64,
-    pub base_charge: f64,
-    pub base_charge_by: NaiveTime,
     pub max_charge: f64,
     pub flex_charge_hours: i64,
+    pub daily_goals: Vec<(NaiveTime, f64)>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
@@ -56,24 +55,26 @@ impl Validate for Config {
 
 impl Validate for Charging {
     fn validate(self) -> Result<Self, Error> {
-        if !(0.0..1.0).contains(&self.base_charge) {
-            return Err(anyhow!(
-                "target_charge {} must be in range [0.0, 1.0)",
-                self.base_charge
-            ));
-        }
         if !(0.0..1.0).contains(&self.max_charge) {
             return Err(anyhow!(
                 "max_charge {} must be in range [0.0, 1.0)",
-                self.base_charge
+                self.max_charge
             ));
         }
         if !(0..(7 * 24)).contains(&self.flex_charge_hours) {
             return Err(anyhow!(
-                "flex_hours {} must be in range [0, {})",
-                self.base_charge,
+                "flex_charge_hours {} must be in range [0, {})",
+                self.flex_charge_hours,
                 7 * 24,
             ));
+        }
+        for (_time, charge) in &self.daily_goals {
+            if !(0.0..1.0).contains(charge) {
+                return Err(anyhow!(
+                    "goal charge {} must be in range [0.0, 1.0)",
+                    charge
+                ));
+            }
         }
 
         if self.allowed_times.is_empty() {
@@ -139,11 +140,13 @@ impl Default for Charging {
                 NaiveTime::from_hms(15, 00, 00),
             )],
             max_charge: 0.85,
-            base_charge: 0.33,
-            base_charge_by: NaiveTime::from_hms(8, 00, 00),
             capacity_kwh: 75.,
             charge_rate_kw: 8.,
-            flex_charge_hours: 72,
+            flex_charge_hours: 24,
+            daily_goals: vec![
+                (NaiveTime::from_hms(8, 0, 0), 0.33),
+                (NaiveTime::from_hms(15, 0, 0), 0.66),
+            ],
         }
     }
 }

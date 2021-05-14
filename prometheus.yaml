@@ -4,3 +4,4 @@ scrape_configs:
     metrics_path: '/'
     static_configs:
       - targets: ['localhost:9999']
+''

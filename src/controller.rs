@@ -37,7 +37,7 @@ impl<'c> Goal<'c> {
 
 impl config::Charging {
     /// Returns whether to charge, and the emissions limit used to make that decision.
-    #[tracing::instrument(skip(self,current,history,forecast))]
+    #[tracing::instrument(skip(self, current, history, forecast))]
     pub fn can_charge(
         &self,
         now: DateTime<Utc>,
@@ -46,7 +46,6 @@ impl config::Charging {
         current: &Moer,
         forecast: &Forecast,
     ) -> (bool, i64) {
-        let end = now + Duration::hours(self.flex_charge_hours);
         // Don't charge outside of allowed times.
         if !self.allowed_at(now) {
             return (false, -1);
@@ -57,31 +56,34 @@ impl config::Charging {
             return (false, -1);
         }
 
-        let goals = vec![
-            // Base charging: hit a base charge level at a fixed time each day.
-            Goal {
-                time: now
-                    .with_timezone(&Pacific)
-                    .date()
-                    .and_time(self.base_charge_by)
-                    .unwrap()
-                    .with_timezone(&Utc),
-                charge: self.base_charge,
-                config: &self,
-            },
-            // Flex charging: aim to complete the rest of the charging a fixed
-            // time from now, whatever now is.
-            Goal {
-                time: end,
-                charge: self.max_charge,
-                config: &self,
-            },
-        ];
-        tracing::info!(?goals);
+        // The config specifies recurring daily goals.  The next recurrence is
+        // either today or tomorrow, so generate both as candidates.
+        let today = now.with_timezone(&Pacific).date();
+        let tomorrow = today.succ();
 
-        // Only retain future goals
-        let mut goals = goals
-            .into_iter()
+        let today_goals = self.daily_goals.iter().map(|(time, charge)| Goal {
+            time: today.and_time(*time).unwrap().with_timezone(&Utc),
+            charge: *charge,
+            config: &self,
+        });
+        let tomorrow_goals = self.daily_goals.iter().map(|(time, charge)| Goal {
+            time: tomorrow.and_time(*time).unwrap().with_timezone(&Utc),
+            charge: *charge,
+            config: &self,
+        });
+
+        // Flex charging: aim to complete the rest of the charging a fixed
+        // time from now, whatever now is.
+        let flex_goal = Goal {
+            time: now + Duration::hours(self.flex_charge_hours),
+            charge: self.max_charge,
+            config: &self,
+        };
+
+        let mut goals = std::iter::once(flex_goal)
+            .chain(today_goals)
+            .chain(tomorrow_goals)
+            // Only retain future goals
             .filter(|goal| goal.time > now)
             .collect::<Vec<Goal>>();
 
@@ -92,8 +94,9 @@ impl config::Charging {
 
             a_req.partial_cmp(&b_req).unwrap()
         });
+        tracing::info!(?goals);
         let goal = goals.pop().expect("must have at least one goal");
-        tracing::info!(?goal);
+        tracing::info!(?goal, "selected goal");
 
         let available_charging_hours = goal.available_charging_hours(now);
         let required_charging_proportion = goal.required_charging_proportion(now, soc);
