@@ -14,7 +14,7 @@ struct Goal<'c> {
 impl<'c> std::fmt::Debug for Goal<'c> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Goal")
-            .field("time", &self.time)
+            .field("time", &self.time.with_timezone(&Pacific))
             .field("charge", &self.charge)
             .finish()
     }
