@@ -104,13 +104,23 @@ impl config::Charging {
         let available_charging_hours = goal.available_charging_hours(now);
         let required_charging_proportion = goal.required_charging_proportion(now, soc);
 
+        let lookahead = self
+            .allowed_times_during(now..goal.time)
+            .collect::<Vec<_>>();
+
         // The SGIP forecasts often get the curve right but offset up or down,
         // which biases the forecast emissions data, so combine the forecast
-        // data with actual emissions over a longer time period.
-        let lookback = self
-            .allowed_times_during((now - Duration::hours(2 * self.flex_charge_hours))..now)
-            .collect();
-        let lookahead = self.allowed_times_during(now..goal.time).collect();
+        // data for the allowed charging windows with the actual data for the
+        // same windows on previous days.
+        let lookback = [Duration::days(1), Duration::days(2)]
+            .iter()
+            .flat_map(|offset| {
+                lookahead
+                    .iter()
+                    .map(move |std::ops::Range { start, end }| (*start - *offset)..(*end - *offset))
+            })
+            .collect::<Vec<_>>();
+        tracing::debug!(?lookahead, ?lookback);
 
         let mut emissions = history.histogram_over(lookback) + forecast.histogram_over(lookahead);
 
