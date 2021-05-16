@@ -147,10 +147,10 @@ impl config::Charging {
             ?can_charge,
         );
 
-        metrics::gauge!("soc", soc);
-        metrics::gauge!("available_charging_hours", available_charging_hours);
-        metrics::gauge!("required_charging_proportion", required_charging_proportion);
-        metrics::gauge!("target_charge", goal.charge);
+        metrics::gauge!("vehicle_soc", soc);
+        metrics::gauge!("charge_available_hours", available_charging_hours);
+        metrics::gauge!("charge_required_proportion", required_charging_proportion);
+        metrics::gauge!("charge_goal", goal.charge);
 
         let g_to_kg = |g: u64| (g as f64) / 1000.;
         let emissions_quantile = |q: f64| g_to_kg(emissions.value_at_quantile(q));
@@ -227,12 +227,12 @@ pub async fn start(
                 let rsp = vehicle.charge_start().await;
                 tracing::info!(?rsp, "charge start");
                 is_charging = true;
-                metrics::gauge!("charging", 1.0);
+                metrics::gauge!("charge_state", 1.0);
             } else {
                 let rsp = vehicle.charge_stop().await;
                 tracing::info!(?rsp, "charge stop");
                 is_charging = false;
-                metrics::gauge!("charging", 0.0);
+                metrics::gauge!("charge_state", 0.0);
             }
         } else {
             // We need to tell the car to stop charging if we're no longer allowed to charge.
@@ -243,7 +243,7 @@ pub async fn start(
             }
             // Log the current MOER anyways, for metrics dashboards.
             metrics::gauge!("emissions_current", current.rate);
-            metrics::gauge!("charging", 0.0);
+            metrics::gauge!("charge_state", 0.0);
             tracing::info!("Not allowed to charge, sleeping");
         }
 
