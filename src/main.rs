@@ -1,7 +1,7 @@
 use std::{fs::File, io::prelude::*, net::SocketAddr, path::PathBuf};
 
 use anyhow::Error;
-use chrono::{Duration, NaiveTime, TimeZone, Utc};
+use chrono::{Duration, NaiveTime, Utc};
 use chrono_tz::US::Pacific;
 use structopt::StructOpt;
 
@@ -122,11 +122,11 @@ async fn start(config: Config, prometheus_endpoint: Option<SocketAddr>) -> Resul
         tesla_credentials,
     } = config;
 
-    use sgip_ev_charging::{tesla, History};
+    use sgip_ev_charging::tesla;
     use sgip_signal::SgipSignal;
 
     tracing::info!("Logging in to SGIP API");
-    let mut sgip = SgipSignal::login(
+    let sgip = SgipSignal::login(
         &sgip_credentials.sgip_username,
         &sgip_credentials.sgip_password,
     )
@@ -143,65 +143,7 @@ async fn start(config: Config, prometheus_endpoint: Option<SocketAddr>) -> Resul
     tracing::info!("Fetching vehicle info");
     let vehicle = tesla_token.vehicles("sgip-ev-charging").await?.remove(0);
 
-    let next_window = || {
-        let now = Utc::now().timestamp();
-        // Next 5-minute interval.
-        let next = now + (300 - now.rem_euclid(300));
-        Utc.timestamp(next, 0)
-    };
-
-    loop {
-        tracing::info!("Fetching current MOER");
-        let current = sgip.moer(charging.region).await?;
-        if charging.allowed_at(Utc::now()) {
-            // This can be slow, so start in now in another task
-            // and come back to it.
-            let vehicle2 = vehicle.clone();
-            let charge_state = tokio::spawn(async move {
-                tracing::info!("waking vehicle");
-                vehicle2.wake().await?;
-                vehicle2.charge_state().await
-            });
-
-            // TODO: don't download these every time
-            tracing::info!("Fetching SGIP data");
-            let forecast = sgip.forecast(charging.region).await?;
-            let history = History::new(
-                charging.region,
-                sgip.historic_moers(
-                    charging.region,
-                    Utc::now() - Duration::hours(2 * charging.flex_charge_hours),
-                    None,
-                )
-                .await?,
-            );
-
-            // Ensure the car is online
-            let charge_state = charge_state.await??;
-            tracing::debug!(?charge_state);
-
-            let soc = charge_state.battery_level as f64 / 100.;
-            tracing::info!(?soc);
-
-            if charging
-                .can_charge(Utc::now(), soc, &history, &current, &forecast)
-                .0
-            {
-                let rsp = vehicle.charge_start().await;
-                tracing::info!(?rsp, "charge start");
-            } else {
-                let rsp = vehicle.charge_stop().await;
-                tracing::info!(?rsp, "charge stop");
-            }
-        } else {
-            // Log the current MOER anyways, for metrics dashboards.
-            metrics::gauge!("emissions_current", current.rate);
-            tracing::info!("Not allowed to charge, sleeping");
-        }
-
-        let next = next_window();
-        tokio::time::sleep((next - Utc::now()).to_std().unwrap()).await;
-    }
+    sgip_ev_charging::start(charging, sgip, vehicle).await
 }
 
 async fn simulator(config: Config, backtest_days: usize, prefix: String) -> Result<(), Error> {

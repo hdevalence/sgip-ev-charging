@@ -1,9 +1,10 @@
-use chrono::{DateTime, Duration, Utc};
+use anyhow::Error;
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use chrono_tz::US::Pacific;
-use sgip_signal::{Forecast, Moer};
+use sgip_signal::{Forecast, Moer, SgipSignal};
 
 use super::config;
-use crate::{DurationExt, ForecastExt, History};
+use crate::{tesla::Vehicle, DurationExt, ForecastExt, History};
 
 struct Goal<'c> {
     time: DateTime<Utc>,
@@ -154,5 +155,71 @@ impl config::Charging {
         metrics::gauge!("emissions_limit", g_to_kg(emissions_limit));
 
         (can_charge, emissions_limit as i64)
+    }
+}
+
+pub async fn start(
+    charging: config::Charging,
+    mut sgip: SgipSignal,
+    vehicle: Vehicle,
+) -> Result<(), Error> {
+    let next_window = || {
+        let now = Utc::now().timestamp();
+        // Next 5-minute interval.
+        let next = now + (300 - now.rem_euclid(300));
+        Utc.timestamp(next, 0)
+    };
+
+    loop {
+        tracing::info!("Fetching current MOER");
+        let current = sgip.moer(charging.region).await?;
+        if charging.allowed_at(Utc::now()) {
+            // This can be slow, so start in now in another task
+            // and come back to it.
+            let vehicle2 = vehicle.clone();
+            let charge_state = tokio::spawn(async move {
+                tracing::info!("waking vehicle");
+                vehicle2.wake().await?;
+                vehicle2.charge_state().await
+            });
+
+            // TODO: don't download these every time
+            tracing::info!("Fetching SGIP data");
+            let forecast = sgip.forecast(charging.region).await?;
+            let history = History::new(
+                charging.region,
+                sgip.historic_moers(
+                    charging.region,
+                    Utc::now() - Duration::hours(2 * charging.flex_charge_hours),
+                    None,
+                )
+                .await?,
+            );
+
+            // Ensure the car is online
+            let charge_state = charge_state.await??;
+            tracing::debug!(?charge_state);
+
+            let soc = charge_state.battery_level as f64 / 100.;
+            tracing::info!(?soc);
+
+            if charging
+                .can_charge(Utc::now(), soc, &history, &current, &forecast)
+                .0
+            {
+                let rsp = vehicle.charge_start().await;
+                tracing::info!(?rsp, "charge start");
+            } else {
+                let rsp = vehicle.charge_stop().await;
+                tracing::info!(?rsp, "charge stop");
+            }
+        } else {
+            // Log the current MOER anyways, for metrics dashboards.
+            metrics::gauge!("emissions_current", current.rate);
+            tracing::info!("Not allowed to charge, sleeping");
+        }
+
+        let next = next_window();
+        tokio::time::sleep((next - Utc::now()).to_std().unwrap()).await;
     }
 }

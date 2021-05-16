@@ -14,5 +14,6 @@ use forecast_ext::ForecastExt;
 pub mod config;
 
 pub use config::{Config, Validate};
+pub use controller::start;
 pub use history::History;
 pub use simulator::Simulator;
