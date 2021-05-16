@@ -180,9 +180,15 @@ pub async fn start(
         Utc.timestamp(next, 0)
     };
 
+    // TODO: correctly model vehicle charge state to avoid having to wake the
+    // car every 5 minutes. currently this is just used to stop charging in
+    // disallowed hours
+    let mut is_charging = false;
+
     loop {
         tracing::info!("Fetching current MOER");
         let current = sgip.moer(charging.region).await?;
+
         if charging.allowed_at(Utc::now()) {
             // This can be slow, so start in now in another task
             // and come back to it.
@@ -193,14 +199,15 @@ pub async fn start(
                 vehicle2.charge_state().await
             });
 
-            // TODO: don't download these every time
             tracing::info!("Fetching SGIP data");
             let forecast = sgip.forecast(charging.region).await?;
+            // TODO: don't download this every time
             let history = History::new(
                 charging.region,
                 sgip.historic_moers(
                     charging.region,
-                    Utc::now() - Duration::hours(2 * charging.flex_charge_hours),
+                    // Fetch far enough back to see time-shifted charging windows.
+                    Utc::now() - (Duration::days(2) + Duration::hours(charging.flex_charge_hours)),
                     None,
                 )
                 .await?,
@@ -219,13 +226,24 @@ pub async fn start(
             {
                 let rsp = vehicle.charge_start().await;
                 tracing::info!(?rsp, "charge start");
+                is_charging = true;
+                metrics::gauge!("charging", 1.0);
             } else {
                 let rsp = vehicle.charge_stop().await;
                 tracing::info!(?rsp, "charge stop");
+                is_charging = false;
+                metrics::gauge!("charging", 0.0);
             }
         } else {
+            // We need to tell the car to stop charging if we're no longer allowed to charge.
+            if is_charging {
+                let rsp = vehicle.charge_stop().await;
+                tracing::info!(?rsp, "charge stop");
+                is_charging = false;
+            }
             // Log the current MOER anyways, for metrics dashboards.
             metrics::gauge!("emissions_current", current.rate);
+            metrics::gauge!("charging", 0.0);
             tracing::info!("Not allowed to charge, sleeping");
         }
 
