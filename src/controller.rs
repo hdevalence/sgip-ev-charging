@@ -86,8 +86,8 @@ impl config::Charging {
         let mut goals = std::iter::once(flex_goal)
             .chain(today_goals)
             .chain(tomorrow_goals)
-            // Only retain future goals
             .filter(|goal| goal.time > now)
+            .filter(|goal| goal.charge > soc)
             .collect::<Vec<Goal>>();
 
         // Choose the goal with the largest required charging proportion.
