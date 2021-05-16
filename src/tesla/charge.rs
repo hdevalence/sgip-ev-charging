@@ -39,7 +39,7 @@ pub struct ChargeState {
     pub minutes_to_full_charge: u32,
     pub not_enough_power_to_heat: Option<bool>,
     pub scheduled_charging_pending: bool,
-    pub scheduled_charging_start_time: i64,
+    pub scheduled_charging_start_time: Option<i64>,
     pub time_to_full_charge: f64,
     pub timestamp: i64,
     pub trip_charging: bool,
