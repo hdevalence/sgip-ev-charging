@@ -154,15 +154,15 @@ impl config::Charging {
 
         let g_to_kg = |g: u64| (g as f64) / 1000.;
         let emissions_quantile = |q: f64| g_to_kg(emissions.value_at_quantile(q));
-        metrics::gauge!("emissions_min", emissions_quantile(0.00));
-        metrics::gauge!("emissions_q10", emissions_quantile(0.10));
-        metrics::gauge!("emissions_q25", emissions_quantile(0.25));
-        metrics::gauge!("emissions_q50", emissions_quantile(0.50));
-        metrics::gauge!("emissions_q75", emissions_quantile(0.75));
-        metrics::gauge!("emissions_q90", emissions_quantile(0.90));
-        metrics::gauge!("emissions_max", emissions_quantile(1.00));
+        metrics::gauge!("charge_emissions_min", emissions_quantile(0.00));
+        metrics::gauge!("charge_emissions_q10", emissions_quantile(0.10));
+        metrics::gauge!("charge_emissions_q25", emissions_quantile(0.25));
+        metrics::gauge!("charge_emissions_q50", emissions_quantile(0.50));
+        metrics::gauge!("charge_emissions_q75", emissions_quantile(0.75));
+        metrics::gauge!("charge_emissions_q90", emissions_quantile(0.90));
+        metrics::gauge!("charge_emissions_max", emissions_quantile(1.00));
+        metrics::gauge!("charge_emissions_limit", g_to_kg(emissions_limit));
         metrics::gauge!("emissions_current", g_to_kg(current_rate));
-        metrics::gauge!("emissions_limit", g_to_kg(emissions_limit));
 
         (can_charge, emissions_limit as i64)
     }
