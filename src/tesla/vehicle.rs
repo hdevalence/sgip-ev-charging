@@ -126,7 +126,7 @@ impl Vehicle {
     pub async fn charge_state(&self) -> Result<ChargeState, Error> {
         #[derive(Deserialize)]
         struct Response {
-            response: ChargeState,
+            response: Option<ChargeState>,
         }
 
         Ok(self
@@ -139,7 +139,8 @@ impl Vehicle {
             .await?
             .json::<Response>()
             .await?
-            .response)
+            .response
+            .ok_or_else(|| anyhow!("null ChargeState response"))?)
     }
 
     #[tracing::instrument(skip(self))]
