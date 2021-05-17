@@ -77,9 +77,7 @@ impl config::Charging {
         // time from now, whatever now is.
         let flex_goal = Goal {
             time: now + Duration::hours(self.flex_charge_hours),
-            // Setting this to 1.0 instead of max_charge avoids asymptotic
-            // behavior near the top of the charge state.
-            charge: 1.0,
+            charge: self.max_charge,
             config: &self,
         };
 
