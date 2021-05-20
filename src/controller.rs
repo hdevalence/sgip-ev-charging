@@ -188,49 +188,9 @@ pub async fn start(
         let current = sgip.moer(charging.region).await?;
 
         if charging.allowed_at(Utc::now()) {
-            // This can be slow, so start in now in another task
-            // and come back to it.
-            let vehicle2 = vehicle.clone();
-            let charge_state = tokio::spawn(async move {
-                tracing::info!("waking vehicle");
-                vehicle2.wake().await?;
-                vehicle2.charge_state().await
-            });
-
-            tracing::info!("Fetching SGIP data");
-            let forecast = sgip.forecast(charging.region).await?;
-            // TODO: don't download this every time
-            let history = History::new(
-                charging.region,
-                sgip.historic_moers(
-                    charging.region,
-                    // Fetch far enough back to see time-shifted charging windows.
-                    Utc::now() - (Duration::days(2) + Duration::hours(charging.flex_charge_hours)),
-                    None,
-                )
-                .await?,
-            );
-
-            // Ensure the car is online
-            let charge_state = charge_state.await??;
-            tracing::debug!(?charge_state);
-
-            let soc = charge_state.battery_level as f64 / 100.;
-            tracing::info!(?soc);
-
-            if charging
-                .can_charge(Utc::now(), soc, &history, &current, &forecast)
-                .0
-            {
-                let rsp = vehicle.charge_start().await;
-                tracing::info!(?rsp, "charge start");
-                is_charging = true;
-                metrics::gauge!("charge_state", 1.0);
-            } else {
-                let rsp = vehicle.charge_stop().await;
-                tracing::info!(?rsp, "charge stop");
-                is_charging = false;
-                metrics::gauge!("charge_state", 0.0);
+            match charge_step(&charging, &current, &mut sgip, &vehicle).await {
+                Ok(charging) => is_charging = charging,
+                Err(e) => tracing::error!(%e),
             }
         } else {
             // We need to tell the car to stop charging if we're no longer allowed to charge.
@@ -247,5 +207,62 @@ pub async fn start(
 
         let next = next_window();
         tokio::time::sleep((next - Utc::now()).to_std().unwrap()).await;
+    }
+}
+
+/// Performs one iteration of charge control, returning `true` if charging is
+/// allowed and `false` otherwise.
+///
+/// This code is split out of the main loop so errors returned by the Tesla API
+/// can be reported per iteration.
+async fn charge_step(
+    charging: &config::Charging,
+    current: &Moer,
+    sgip: &mut SgipSignal,
+    vehicle: &Vehicle,
+) -> Result<bool, Error> {
+    // This can be slow, so start in now in another task
+    // and come back to it.
+    let vehicle2 = vehicle.clone();
+    let charge_state = tokio::spawn(async move {
+        tracing::info!("waking vehicle");
+        vehicle2.wake().await?;
+        vehicle2.charge_state().await
+    });
+
+    tracing::info!("Fetching SGIP data");
+    let forecast = sgip.forecast(charging.region).await?;
+    // TODO: don't download this every time
+    let history = History::new(
+        charging.region,
+        sgip.historic_moers(
+            charging.region,
+            // Fetch far enough back to see time-shifted charging windows.
+            Utc::now() - (Duration::days(2) + Duration::hours(charging.flex_charge_hours)),
+            None,
+        )
+        .await?,
+    );
+
+    // Ensure the car is online
+    let charge_state = charge_state.await??;
+    tracing::debug!(?charge_state);
+
+    let soc = charge_state.battery_level as f64 / 100.;
+    tracing::info!(?soc);
+
+    if charging
+        .can_charge(Utc::now(), soc, &history, &current, &forecast)
+        .0
+    {
+        let rsp = vehicle.charge_start().await;
+        tracing::info!(?rsp, "charge start");
+        metrics::gauge!("charge_state", 1.0);
+        Ok(true)
+    } else {
+        let rsp = vehicle.charge_stop().await;
+        tracing::info!(?rsp, "charge stop");
+        metrics::gauge!("charge_state", 0.0);
+        Ok(false)
     }
 }
